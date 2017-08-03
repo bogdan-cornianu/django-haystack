@@ -131,10 +131,16 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                 raise
 
         unified_index = haystack.connections[self.connection_alias].get_unified_index()
-        self.content_field_name, field_mapping = self.build_schema(unified_index.all_searchfields())
+        self.content_field_name, field_mapping, source = self.build_schema(
+            unified_index.all_searchfields())
         current_mapping = {
             'modelresult': {
                 'properties': field_mapping,
+                '_boost': {
+                    'name': 'boost',
+                    'null_value': 1.0
+                },
+                '_source': source,
             }
         }
 
@@ -260,6 +266,9 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                             result_class=None, **extra_kwargs):
         index = haystack.connections[self.connection_alias].get_unified_index()
         content_field = index.document_field
+        boosted_fields = set(
+            field.index_fieldname for field in index.get_boosted_fields())
+        boosted_fields.add(content_field)
 
         if query_string == '*:*':
             kwargs = {
@@ -271,13 +280,12 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
             kwargs = {
                 'query': {
                     'query_string': {
-                        'default_field': content_field,
+                        'fields': [field for field in boosted_fields],
                         'default_operator': DEFAULT_OPERATOR,
                         'query': query_string,
                         'analyze_wildcard': True,
                         'auto_generate_phrase_queries': True,
-                        'fuzzy_min_sim': FUZZY_MIN_SIM,
-                        'fuzzy_max_expansions': FUZZY_MAX_EXPANSIONS,
+                        'use_dis_max': len(boosted_fields) > 1
                     },
                 },
             }
@@ -667,11 +675,15 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
             DJANGO_CT: {'type': 'string', 'index': 'not_analyzed', 'include_in_all': False},
             DJANGO_ID: {'type': 'string', 'index': 'not_analyzed', 'include_in_all': False},
         }
+        source_excludes = []
 
         for field_name, field_class in fields.items():
             field_mapping = FIELD_MAPPINGS.get(field_class.field_type, DEFAULT_FIELD_MAPPING).copy()
             if field_class.boost != 1.0:
                 field_mapping['boost'] = field_class.boost
+
+            if field_class.analyzer is not None:
+                field_mapping['analyzer'] = field_class.analyzer
 
             if field_class.document is True:
                 content_field_name = field_class.index_fieldname
@@ -683,8 +695,10 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                     del field_mapping['analyzer']
 
             mapping[field_class.index_fieldname] = field_mapping
+            if field_class.stored is False:
+                source_excludes.append(field_name)
 
-        return (content_field_name, mapping)
+        return (content_field_name, mapping, {"excludes": source_excludes})
 
     def _iso_datetime(self, value):
         """

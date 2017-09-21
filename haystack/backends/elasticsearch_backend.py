@@ -260,6 +260,9 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
                             result_class=None, **extra_kwargs):
         index = haystack.connections[self.connection_alias].get_unified_index()
         content_field = index.document_field
+        boosted_fields = set(
+            field.index_fieldname for field in index.get_boosted_fields())
+        boosted_fields.add(content_field)
 
         if query_string == '*:*':
             kwargs = {
@@ -271,13 +274,14 @@ class ElasticsearchSearchBackend(BaseSearchBackend):
             kwargs = {
                 'query': {
                     'query_string': {
-                        'default_field': content_field,
+                        'fields': [field for field in boosted_fields],
                         'default_operator': DEFAULT_OPERATOR,
                         'query': query_string,
                         'analyze_wildcard': True,
                         'auto_generate_phrase_queries': True,
                         'fuzzy_min_sim': FUZZY_MIN_SIM,
                         'fuzzy_max_expansions': FUZZY_MAX_EXPANSIONS,
+                        'use_dis_max': len(boosted_fields) > 1
                     },
                 },
             }

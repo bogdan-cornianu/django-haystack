@@ -470,6 +470,7 @@ class BaseSearchQuery(object):
         from haystack import connections
         self._using = using
         self.backend = connections[self._using].get_backend()
+        self._raw_filter = []
 
     def __str__(self):
         return self.build_query()
@@ -757,6 +758,9 @@ class BaseSearchQuery(object):
     def build_exact_query(self, query_string):
         return u'"%s"' % query_string
 
+    def add_raw_filter(self, raw_filter):
+        self._raw_filter.append(raw_filter)
+
     def add_filter(self, query_filter, use_or=False):
         """
         Adds a SQ to the current query.
@@ -1002,6 +1006,7 @@ class BaseSearchQuery(object):
         clone.spelling_query = self.spelling_query
         clone._more_like_this = self._more_like_this
         clone._mlt_instance = self._mlt_instance
+        clone._raw_filter = deepcopy(self._raw_filter)
 
         return clone
 
